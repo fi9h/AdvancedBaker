@@ -432,7 +432,7 @@ class ADVBAKER_UL_queue_list(bpy.types.UIList):
         row = layout.row(align=True)
         
         if not item.obj_ptr:
-            row.label(text="<Deleted>", icon='GHOST')
+            row.label(text="<Deleted>", icon='QUESTION')
         else:
             row.label(text=item.name, icon='OBJECT_DATA')
             
