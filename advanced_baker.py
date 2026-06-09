@@ -462,7 +462,7 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         layout.separator()
         
         # --- Queue UI ---
-        layout.label(text="Bake Queue:", icon='SORT_TIME')
+        layout.label(text="Bake Queue:", icon='MENU_PANEL')
         row = layout.row()
         row.template_list("ADVBAKER_UL_queue_list", "", scene, "adv_baker_queue", scene, "adv_baker_active_index", rows=4)
         
@@ -474,7 +474,7 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         if len(scene.adv_baker_queue) > 0 and scene.adv_baker_active_index < len(scene.adv_baker_queue):
             item = scene.adv_baker_queue[scene.adv_baker_active_index]
             box = layout.box()
-            box.label(text=f"Settings: {item.name}", icon='OPTIONS')
+            box.label(text=f"Settings: {item.name}", icon='PREFERENCES')
             bcol = box.column(align=True)
             if settings.bake_mode == 'PARTICLES':
                 bcol.prop(item, "frame_start")
