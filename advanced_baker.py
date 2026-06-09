@@ -302,9 +302,9 @@ class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
         return {'FINISHED'}
 
 class ADVBAKER_OT_open_donation(bpy.types.Operator):
-    """Support the creator of this add-on"""
+    """Support us to keep improving this add-on"""
     bl_idname = "advbaker.open_donation"
-    bl_label = "Support on Ko-fi"
+    bl_label = "Support Us"
     
     def execute(self, context):
         import webbrowser
