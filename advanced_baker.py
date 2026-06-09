@@ -6,7 +6,7 @@ import platform
 bl_info = {
     "name": "Advanced Baker",
     "author": "Antigravity",
-    "version": (2, 0, 0),
+    "version": (2, 1, 0),
     "blender": (3, 2, 0),
     "location": "View3D > Sidebar > Adv Baker",
     "description": "Universal non-blocking baker with persistent queue and hardware detection.",
@@ -17,11 +17,22 @@ bl_info = {
 
 # --- Properties ---
 
+class AdvBakerObjectSettings(bpy.types.PropertyGroup):
+    start_frame: bpy.props.IntProperty(name="Start Frame", default=1, min=1, max=10000000)
+    end_frame: bpy.props.IntProperty(name="End Frame", default=250, min=1, max=10000000)
+    quality: bpy.props.EnumProperty(
+        name="Quality",
+        items=[
+            ('LIGHT', "Light", "Fast/Low quality"),
+            ('MEDIUM', "Medium", "Balanced quality"),
+            ('HIGH', "High", "Production quality")
+        ],
+        default='MEDIUM'
+    )
+
 class AdvBakerQueueItem(bpy.types.PropertyGroup):
     obj_ptr: bpy.props.PointerProperty(type=bpy.types.Object)
     system_name: bpy.props.StringProperty(name="System Name")
-    frame_start: bpy.props.IntProperty(name="Start", default=1, min=1)
-    frame_end: bpy.props.IntProperty(name="End", default=250, min=1)
     progress: bpy.props.FloatProperty(name="Progress", default=0.0, min=0.0, max=100.0)
     status: bpy.props.EnumProperty(
         name="Status",
@@ -33,15 +44,6 @@ class AdvBakerQueueItem(bpy.types.PropertyGroup):
             ('CANCELED', "Canceled", "", "PAUSE", 5)
         ],
         default='QUEUED'
-    )
-    quality: bpy.props.EnumProperty(
-        name="Quality",
-        items=[
-            ('LIGHT', "Light", "Fast/Low quality"),
-            ('MEDIUM', "Medium", "Balanced quality"),
-            ('HIGH', "High", "Production quality")
-        ],
-        default='MEDIUM'
     )
 
 class AdvBakerSceneSettings(bpy.types.PropertyGroup):
@@ -76,7 +78,6 @@ def get_hardware_info():
 # --- Queue Management Operators ---
 
 class ADVBAKER_OT_queue_add(bpy.types.Operator):
-    """Add selected objects to the bake queue"""
     bl_idname = "advbaker.queue_add"
     bl_label = "Add Selected"
     
@@ -97,8 +98,6 @@ class ADVBAKER_OT_queue_add(bpy.types.Operator):
                         item.name = f"{obj.name} [{mod.name}]"
                         item.obj_ptr = obj
                         item.system_name = mod.name
-                        item.frame_start = context.scene.frame_start
-                        item.frame_end = context.scene.frame_end
                         item.status = 'QUEUED'
                         item.progress = 0.0
                         added += 1
@@ -107,8 +106,6 @@ class ADVBAKER_OT_queue_add(bpy.types.Operator):
                 item.name = f"{obj.name} [Texture]"
                 item.obj_ptr = obj
                 item.system_name = "Texture"
-                item.frame_start = 1
-                item.frame_end = 1
                 item.status = 'QUEUED'
                 item.progress = 0.0
                 added += 1
@@ -118,7 +115,6 @@ class ADVBAKER_OT_queue_add(bpy.types.Operator):
         return {'FINISHED'}
 
 class ADVBAKER_OT_queue_remove(bpy.types.Operator):
-    """Remove selected item from queue"""
     bl_idname = "advbaker.queue_remove"
     bl_label = "Remove"
     
@@ -135,7 +131,6 @@ class ADVBAKER_OT_queue_remove(bpy.types.Operator):
         return {'FINISHED'}
 
 class ADVBAKER_OT_queue_clear_completed(bpy.types.Operator):
-    """Clear all Done, Error, or Canceled items"""
     bl_idname = "advbaker.queue_clear_completed"
     bl_label = "Clear Completed"
     
@@ -153,8 +148,26 @@ class ADVBAKER_OT_queue_clear_completed(bpy.types.Operator):
 
 # --- Baking Operators ---
 
+class ADVBAKER_OT_free_all_caches(bpy.types.Operator):
+    """Free particle caches for all selected objects"""
+    bl_idname = "advbaker.free_all_caches"
+    bl_label = "Free All Selected Caches"
+    
+    def execute(self, context):
+        count = 0
+        for obj in context.selected_objects:
+            if not obj.particle_systems:
+                continue
+            with context.temp_override(active_object=obj, object=obj):
+                try:
+                    bpy.ops.ptcache.free_bake_all()
+                    count += 1
+                except Exception as e:
+                    self.report({'WARNING'}, f"Failed to free cache on {obj.name}: {str(e)}")
+        self.report({'INFO'}, f"Freed caches on {count} objects.")
+        return {'FINISHED'}
+
 class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
-    """Bake queued particles sequentially without locking the UI"""
     bl_idname = "advbaker.bake_particles_modal"
     bl_label = "Bake Queue (Particles)"
     
@@ -164,7 +177,6 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
     _current_frame = 1
     
     def modal(self, context, event):
-        # Panic Button (Abort)
         if event.type == 'ESC':
             if self._current_item_index < len(self._queue_items):
                 self._queue_items[self._current_item_index].status = 'CANCELED'
@@ -180,60 +192,51 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
                 item = self._queue_items[self._current_item_index]
                 obj = item.obj_ptr
                 
-                # BOUNCE 1: Ghost Object (Deleted pointer)
                 if not obj:
                     item.status = 'ERROR'
                     self._current_item_index += 1
                     return {'PASS_THROUGH'}
                 
-                # BOUNCE 2: View Layer Visibility Error
                 if not getattr(obj, "visible_get", lambda: True)():
                     item.status = 'ERROR'
-                    print(f"Skipping {item.name}: Object is hidden from view layer.")
                     self._current_item_index += 1
                     return {'PASS_THROUGH'}
                 
-                # BOUNCE 3: Modifier Disabled Error
                 mod = obj.modifiers.get(item.system_name)
                 if not mod or not mod.show_viewport:
                     item.status = 'ERROR'
-                    print(f"Skipping {item.name}: Modifier missing or disabled.")
                     self._current_item_index += 1
                     return {'PASS_THROUGH'}
                 
-                # Initialization for this queue item
+                obj_settings = obj.adv_baker
+                
                 if self._current_frame == 0:
-                    self._current_frame = item.frame_start
+                    self._current_frame = obj_settings.start_frame
                     item.status = 'BAKING'
                     item.progress = 0.0
                     
                     with context.temp_override(active_object=obj, object=obj):
                         try:
-                            # BOUNCE 4: Disk Cache Missing Error is caught here
                             bpy.ops.ptcache.free_bake_all()
-                        except Exception as e:
-                            print(f"Cache Free Error: {e}")
+                        except: pass
                 
-                # Advance Timeline Frame
                 context.scene.frame_set(self._current_frame)
                 
                 if getattr(context, "area", None):
                     context.area.tag_redraw()
                 
-                # BOUNCE 5: Math Corruption (Division by Zero clamp)
-                frame_span = max(1, item.frame_end - item.frame_start)
-                raw_progress = ((self._current_frame - item.frame_start) / frame_span) * 100.0
+                frame_span = max(1, obj_settings.end_frame - obj_settings.start_frame)
+                raw_progress = ((self._current_frame - obj_settings.start_frame) / frame_span) * 100.0
                 item.progress = min(100.0, max(0.0, raw_progress))
                 
                 self._current_frame += 1
                 
-                if self._current_frame > item.frame_end:
+                if self._current_frame > obj_settings.end_frame:
                     item.status = 'DONE'
                     item.progress = 100.0
                     self._current_item_index += 1
                     self._current_frame = 0 
             except Exception as e:
-                print(f"FATAL BAKE ERROR: {e}")
                 if self._current_item_index < len(self._queue_items):
                     self._queue_items[self._current_item_index].status = 'ERROR'
                 self.report({'ERROR'}, f"Bake failed: {e}")
@@ -289,7 +292,6 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
         self.report({'INFO'}, "Batch Baking Complete")
         
 class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
-    """Bake queued textures sequentially"""
     bl_idname = "advbaker.bake_textures_modal"
     bl_label = "Bake Queue (Textures)"
     
@@ -322,10 +324,11 @@ class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
                     self._current_item_index += 1
                     return {'PASS_THROUGH'}
                 
+                obj_settings = obj.adv_baker
                 res = 1024
-                if item.quality == 'LIGHT': res = 512
-                elif item.quality == 'MEDIUM': res = 1024
-                elif item.quality == 'HIGH': res = 2048
+                if obj_settings.quality == 'LIGHT': res = 512
+                elif obj_settings.quality == 'MEDIUM': res = 1024
+                elif obj_settings.quality == 'HIGH': res = 2048
                 
                 tree = obj.active_material.node_tree
                 nodes = tree.nodes
@@ -461,9 +464,40 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         
         layout.separator()
         
-        # --- Queue UI ---
-        layout.label(text="Bake Queue:", icon='MENU_PANEL')
-        row = layout.row()
+        # --- BIG BAKE BUTTONS ---
+        is_locked = settings.is_baking
+        col = layout.column()
+        col.enabled = not is_locked
+        if settings.bake_mode == 'PARTICLES':
+            col.operator("advbaker.bake_particles_modal", icon='PHYSICS', text="Bake All Queued (Particles)")
+        else:
+            col.operator("advbaker.bake_textures_modal", icon='TEXTURE', text="Bake All Queued (Textures)")
+            
+        layout.separator()
+        
+        # --- OLD PER-OBJECT OVERRIDES ---
+        layout.label(text="Per-Object Overrides:")
+        
+        obj = context.active_object
+        if obj:
+            layout.label(text=f"Active: {obj.name}", icon='OBJECT_DATA')
+            obj_settings = obj.adv_baker
+            col = layout.column(align=True)
+            if settings.bake_mode == 'PARTICLES':
+                col.prop(obj_settings, "start_frame")
+                col.prop(obj_settings, "end_frame")
+            else:
+                col.prop(obj_settings, "quality")
+        else:
+            layout.label(text="Select an object to see settings.", icon='ERROR')
+            
+        layout.separator()
+        
+        # --- ADDED QUEUE UI ---
+        box = layout.box()
+        box.label(text="Live Bake Queue", icon='MENU_PANEL')
+        
+        row = box.row()
         row.template_list("ADVBAKER_UL_queue_list", "", scene, "adv_baker_queue", scene, "adv_baker_active_index", rows=4)
         
         col = row.column(align=True)
@@ -471,38 +505,19 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         col.operator("advbaker.queue_remove", icon='REMOVE', text="")
         col.operator("advbaker.queue_clear_completed", icon='TRASH', text="")
         
-        if len(scene.adv_baker_queue) > 0 and scene.adv_baker_active_index < len(scene.adv_baker_queue):
-            item = scene.adv_baker_queue[scene.adv_baker_active_index]
-            box = layout.box()
-            box.label(text=f"Settings: {item.name}", icon='PREFERENCES')
-            bcol = box.column(align=True)
-            if settings.bake_mode == 'PARTICLES':
-                bcol.prop(item, "frame_start")
-                bcol.prop(item, "frame_end")
-            else:
-                bcol.prop(item, "quality")
-                
-        layout.separator()
-        
-        is_locked = settings.is_baking
-        col = layout.column()
-        col.enabled = not is_locked
-        if settings.bake_mode == 'PARTICLES':
-            col.operator("advbaker.bake_particles_modal", icon='PHYSICS', text="Bake Queue (Particles)")
-        else:
-            col.operator("advbaker.bake_textures_modal", icon='TEXTURE', text="Bake Queue (Textures)")
-            
         layout.separator()
         layout.operator("advbaker.open_donation", icon='FUND')
 
 # --- Registration ---
 
 classes = (
+    AdvBakerObjectSettings,
     AdvBakerQueueItem,
     AdvBakerSceneSettings,
     ADVBAKER_OT_queue_add,
     ADVBAKER_OT_queue_remove,
     ADVBAKER_OT_queue_clear_completed,
+    ADVBAKER_OT_free_all_caches,
     ADVBAKER_OT_bake_particles_modal,
     ADVBAKER_OT_bake_textures_modal,
     ADVBAKER_OT_open_donation,
@@ -513,6 +528,7 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    bpy.types.Object.adv_baker = bpy.props.PointerProperty(type=AdvBakerObjectSettings)
     bpy.types.Scene.adv_baker = bpy.props.PointerProperty(type=AdvBakerSceneSettings)
     bpy.types.Scene.adv_baker_queue = bpy.props.CollectionProperty(type=AdvBakerQueueItem)
     bpy.types.Scene.adv_baker_active_index = bpy.props.IntProperty(name="Active Queue Index", default=0)
@@ -520,6 +536,7 @@ def register():
 def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+    del bpy.types.Object.adv_baker
     del bpy.types.Scene.adv_baker
     del bpy.types.Scene.adv_baker_queue
     del bpy.types.Scene.adv_baker_active_index
