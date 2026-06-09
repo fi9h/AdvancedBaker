@@ -34,6 +34,7 @@ class AdvBakerQueueItem(bpy.types.PropertyGroup):
     obj_ptr: bpy.props.PointerProperty(type=bpy.types.Object)
     system_name: bpy.props.StringProperty(name="System Name")
     progress: bpy.props.FloatProperty(name="Progress", default=0.0, min=0.0, max=100.0)
+    eta: bpy.props.StringProperty(name="ETA", default="")
     status: bpy.props.EnumProperty(
         name="Status",
         items=[
@@ -177,6 +178,7 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
     _queue_items = []
     _current_item_index = 0
     _current_frame = 1
+    _start_time = 0.0
     
     def modal(self, context, event):
         if event.type == 'ESC':
@@ -214,8 +216,10 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
                 
                 if self._current_frame == 0:
                     self._current_frame = obj_settings.start_frame
+                    self._start_time = time.time()
                     item.status = 'BAKING'
                     item.progress = 0.0
+                    item.eta = "Calc..."
                     
                     with context.temp_override(active_object=obj, object=obj):
                         try:
@@ -230,6 +234,11 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
                 frame_span = max(1, obj_settings.end_frame - obj_settings.start_frame)
                 raw_progress = ((self._current_frame - obj_settings.start_frame) / frame_span) * 100.0
                 item.progress = min(100.0, max(0.0, raw_progress))
+                
+                if item.progress > 0.0:
+                    elapsed = time.time() - self._start_time
+                    rem = (elapsed / (item.progress / 100.0)) - elapsed
+                    item.eta = f"{int(rem // 60):02d}:{int(rem % 60):02d}"
                 
                 self._current_frame += 1
                 
@@ -495,7 +504,7 @@ class ADVBAKER_UL_queue_list(bpy.types.UIList):
             
         if item.status == 'BAKING':
             row.prop(item, "progress", text="", slider=True)
-            row.label(text="", icon='TIME')
+            row.label(text=item.eta, icon='TIME')
         else:
             if item.status == 'QUEUED':
                 row.label(text="Queued", icon='TIME')
