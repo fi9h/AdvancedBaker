@@ -17,6 +17,10 @@ Natively, automating baking in Blender can be incredibly frustrating due to `con
 - **Infinite Scaling:** No arbitrary frame limits (supports up to 10,000,000 frames).
 - **Batch Processing:** Select multiple objects, configure their overrides, and bake them sequentially.
 
+## Support the Creator
+If you find this add-on useful and it saves you hours of baking headaches, please consider supporting me on Ko-fi!
+☕ [Support me on Ko-fi](https://ko-fi.com/faisalabusadahakafi9h)
+
 ## Installation
 1. Download `advanced_baker.py` from this repository.
 2. Open Blender and go to **Edit > Preferences > Add-ons**.

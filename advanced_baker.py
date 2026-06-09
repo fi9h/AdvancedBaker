@@ -301,6 +301,16 @@ class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
         self.report({'INFO'}, "Texture Baking Complete")
         return {'FINISHED'}
 
+class ADVBAKER_OT_open_donation(bpy.types.Operator):
+    """Support the creator of this add-on"""
+    bl_idname = "advbaker.open_donation"
+    bl_label = "Support on Ko-fi"
+    
+    def execute(self, context):
+        import webbrowser
+        webbrowser.open("https://ko-fi.com/faisalabusadahakafi9h")
+        return {'FINISHED'}
+
 # --- UI Panel ---
 
 class ADVBAKER_PT_main_panel(bpy.types.Panel):
@@ -363,6 +373,9 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
             col.prop(obj_settings, "quality")
         else:
             layout.label(text="Select an object to see settings.", icon='ERROR')
+            
+        layout.separator()
+        layout.operator("advbaker.open_donation", icon='FUND')
 
 # --- Registration ---
 
@@ -372,6 +385,7 @@ classes = (
     ADVBAKER_OT_free_all_caches,
     ADVBAKER_OT_bake_particles_modal,
     ADVBAKER_OT_bake_textures_modal,
+    ADVBAKER_OT_open_donation,
     ADVBAKER_PT_main_panel,
 )
 
