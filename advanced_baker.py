@@ -6,8 +6,8 @@ import platform
 bl_info = {
     "name": "Advanced Baker",
     "author": "Antigravity",
-    "version": (1, 2, 0),
-    "blender": (3, 0, 0),
+    "version": (1, 2, 1),
+    "blender": (3, 2, 0),
     "location": "View3D > Sidebar > Adv Baker",
     "description": "Universal non-blocking baker with anti-freeze and hardware detection.",
     "warning": "",
@@ -18,7 +18,6 @@ bl_info = {
 # --- Properties ---
 
 class AdvBakerObjectSettings(bpy.types.PropertyGroup):
-    # Expanded max frames to an absurdly high number so there's practically no limit
     start_frame: bpy.props.IntProperty(name="Start Frame", default=1, min=1, max=10000000)
     end_frame: bpy.props.IntProperty(name="End Frame", default=250, min=1, max=10000000)
     quality: bpy.props.EnumProperty(
@@ -105,61 +104,62 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
             return {'CANCELLED'}
 
         if event.type == 'TIMER':
-            if self._current_obj_index >= len(self._objects):
-                self.finish(context)
-                return {'FINISHED'}
+            try:
+                if self._current_obj_index >= len(self._objects):
+                    self.finish(context)
+                    return {'FINISHED'}
+                    
+                obj = self._objects[self._current_obj_index]
+                settings = obj.adv_baker
                 
-            obj = self._objects[self._current_obj_index]
-            settings = obj.adv_baker
-            
-            # Initialization for this object
-            if self._current_frame == 0: 
-                self._current_frame = settings.start_frame
-                self._start_time = time.time()
-                self._frames_baked = 0
+                # Initialization for this object
+                if self._current_frame == 0: 
+                    self._current_frame = settings.start_frame
+                    self._start_time = time.time()
+                    self._frames_baked = 0
+                    
+                    print(f"--- Baking Object {self._current_obj_index + 1}/{len(self._objects)}: {obj.name} ---")
+                    
+                    with context.temp_override(active_object=obj, object=obj):
+                        try:
+                            bpy.ops.ptcache.free_bake_all()
+                        except: pass
                 
-                print(f"--- Baking Object {self._current_obj_index + 1}/{len(self._objects)}: {obj.name} ---")
+                context.scene.frame_set(self._current_frame)
+                self._frames_baked += 1
                 
-                # Free cache first with context override
-                with context.temp_override(active_object=obj, object=obj):
-                    try:
-                        bpy.ops.ptcache.free_bake_all()
-                    except: pass
-            
-            # Advance frame to simulate and cache
-            context.scene.frame_set(self._current_frame)
-            self._frames_baked += 1
-            
-            # Force UI Redraw so Windows/OS does not tag the app as "Not Responding"
-            if context.area:
-                context.area.tag_redraw()
-            
-            # Calculate Progress
-            progress_range = max(1, (settings.end_frame - settings.start_frame))
-            progress = ((self._current_frame - settings.start_frame) / progress_range) * 100
-            
-            # Calculate Dynamic ETA based on hardware processing speed
-            elapsed_time = time.time() - self._start_time
-            time_per_frame = elapsed_time / max(1, self._frames_baked)
-            frames_remaining = settings.end_frame - self._current_frame
-            
-            eta_seconds = time_per_frame * frames_remaining
-            eta_mins = int(eta_seconds // 60)
-            eta_secs = int(eta_seconds % 60)
-            eta_str = f"ETA: {eta_mins}m {eta_secs}s"
-            
-            # Send message to Blender's console and status bar
-            msg = f"[{obj.name}] Frame {self._current_frame}/{settings.end_frame} ({progress:.1f}%) | {eta_str}"
-            print(msg)
-            context.workspace.status_text_set(msg)
-            
-            self._current_frame += 1
-            
-            # Check if object is done
-            if self._current_frame > settings.end_frame:
-                print(f"Finished baking {obj.name} in {int(elapsed_time//60)}m {int(elapsed_time%60)}s")
-                self._current_obj_index += 1
-                self._current_frame = 0 # reset for next object
+                if context.area:
+                    context.area.tag_redraw()
+                
+                progress_range = max(1, (settings.end_frame - settings.start_frame))
+                progress = ((self._current_frame - settings.start_frame) / progress_range) * 100
+                
+                elapsed_time = time.time() - self._start_time
+                time_per_frame = elapsed_time / max(1, self._frames_baked)
+                frames_remaining = settings.end_frame - self._current_frame
+                
+                eta_seconds = time_per_frame * frames_remaining
+                eta_mins = int(eta_seconds // 60)
+                eta_secs = int(eta_seconds % 60)
+                eta_str = f"ETA: {eta_mins}m {eta_secs}s"
+                
+                msg = f"[{obj.name}] Frame {self._current_frame}/{settings.end_frame} ({progress:.1f}%) | {eta_str}"
+                print(msg)
+                
+                if hasattr(context.workspace, "status_text_set"):
+                    context.workspace.status_text_set(msg)
+                
+                self._current_frame += 1
+                
+                if self._current_frame > settings.end_frame:
+                    print(f"Finished baking {obj.name} in {int(elapsed_time//60)}m {int(elapsed_time%60)}s")
+                    self._current_obj_index += 1
+                    self._current_frame = 0 
+            except Exception as e:
+                print(f"FATAL BAKE ERROR: {e}")
+                self.report({'ERROR'}, f"Bake failed: {e}")
+                self.cancel(context)
+                return {'CANCELLED'}
 
         return {'PASS_THROUGH'}
 
@@ -183,21 +183,27 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def cancel(self, context):
-        wm = context.window_manager
-        wm.event_timer_remove(self._timer)
-        context.workspace.status_text_set(None)
-        self.report({'WARNING'}, "Baking Cancelled by User")
+        if self._timer:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if hasattr(context.workspace, "status_text_set"):
+            context.workspace.status_text_set(None)
+        self.report({'WARNING'}, "Baking Cancelled by User or Error")
 
     def finish(self, context):
-        wm = context.window_manager
-        wm.event_timer_remove(self._timer)
-        context.workspace.status_text_set(None)
+        if self._timer:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if hasattr(context.workspace, "status_text_set"):
+            context.workspace.status_text_set(None)
         
         self.report({'INFO'}, "Batch Baking Complete")
         print("Batch Baking Complete!")
         
         if context.scene.adv_baker.auto_pack:
-            bpy.ops.image.pack()
+            try:
+                bpy.ops.image.pack()
+            except: pass
 
 class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
     """Bake textures sequentially using a modal to prevent full batch freeze"""
@@ -214,52 +220,55 @@ class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
             return {'CANCELLED'}
 
         if event.type == 'TIMER':
-            if self._current_obj_index >= len(self._objects):
-                self.finish(context)
-                return {'FINISHED'}
+            try:
+                if self._current_obj_index >= len(self._objects):
+                    self.finish(context)
+                    return {'FINISHED'}
+                    
+                obj = self._objects[self._current_obj_index]
+                settings = obj.adv_baker
                 
-            obj = self._objects[self._current_obj_index]
-            settings = obj.adv_baker
-            
-            print(f"Preparing texture bake for {obj.name} ({self._current_obj_index + 1}/{len(self._objects)})")
-            context.workspace.status_text_set(f"Baking Texture for {obj.name}...")
-            
-            # Force UI redraw to update status text before the heavy C-level bake freezes it
-            if context.area:
-                context.area.tag_redraw()
-            
-            res = 1024
-            if settings.quality == 'LIGHT': res = 512
-            elif settings.quality == 'MEDIUM': res = 1024
-            elif settings.quality == 'HIGH': res = 2048
-            
-            if obj.active_material and obj.active_material.use_nodes:
-                tree = obj.active_material.node_tree
-                nodes = tree.nodes
+                print(f"Preparing texture bake for {obj.name} ({self._current_obj_index + 1}/{len(self._objects)})")
+                if hasattr(context.workspace, "status_text_set"):
+                    context.workspace.status_text_set(f"Baking Texture for {obj.name}...")
                 
-                img_name = f"{obj.name}_Bake"
-                img = bpy.data.images.get(img_name)
-                if not img:
-                    img = bpy.data.images.new(img_name, width=res, height=res)
+                if context.area:
+                    context.area.tag_redraw()
                 
-                tex_node = nodes.new('ShaderNodeTexImage')
-                tex_node.image = img
-                tex_node.name = "ADV_BAKER_NODE"
-                nodes.active = tex_node
+                res = 1024
+                if settings.quality == 'LIGHT': res = 512
+                elif settings.quality == 'MEDIUM': res = 1024
+                elif settings.quality == 'HIGH': res = 2048
                 
-                with context.temp_override(active_object=obj, object=obj):
-                    try:
-                        # This single bake call will lock the UI temporarily,
-                        # but breaking it into a modal prevents "App Not Responding" 
-                        # for the ENTIRE duration of the 5-bird batch queue.
-                        bpy.ops.object.bake(type='DIFFUSE', save_mode='INTERNAL')
-                        print(f"[{obj.name}] Texture baked successfully.")
-                    except Exception as e:
-                        print(f"ERROR: {obj.name} failed to bake: {e}")
-            else:
-                print(f"ERROR: {obj.name} has no active node-based material. Skipping.")
-            
-            self._current_obj_index += 1
+                if obj.active_material and obj.active_material.use_nodes:
+                    tree = obj.active_material.node_tree
+                    nodes = tree.nodes
+                    
+                    img_name = f"{obj.name}_Bake"
+                    img = bpy.data.images.get(img_name)
+                    if not img:
+                        img = bpy.data.images.new(img_name, width=res, height=res)
+                    
+                    tex_node = nodes.new('ShaderNodeTexImage')
+                    tex_node.image = img
+                    tex_node.name = "ADV_BAKER_NODE"
+                    nodes.active = tex_node
+                    
+                    with context.temp_override(active_object=obj, object=obj):
+                        try:
+                            bpy.ops.object.bake(type='DIFFUSE', save_mode='INTERNAL')
+                            print(f"[{obj.name}] Texture baked successfully.")
+                        except Exception as e:
+                            print(f"ERROR: {obj.name} failed to bake: {e}")
+                else:
+                    print(f"ERROR: {obj.name} has no active node-based material. Skipping.")
+                
+                self._current_obj_index += 1
+            except Exception as e:
+                print(f"FATAL TEXTURE BAKE ERROR: {e}")
+                self.report({'ERROR'}, f"Texture Bake failed: {e}")
+                self.cancel(context)
+                return {'CANCELLED'}
             
         return {'PASS_THROUGH'}
 
@@ -275,23 +284,26 @@ class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
         self._current_obj_index = 0
         
         wm = context.window_manager
-        # Fire timer very slowly (0.5s) to ensure UI has time to redraw between heavy texture bakes
         self._timer = wm.event_timer_add(0.5, window=context.window)
         wm.modal_handler_add(self)
         
-        self.report({'INFO'}, f"Started Texture Batch. Press ESC to cancel between objects.")
+        self.report({'INFO'}, f"Started Texture Batch. Press ESC to cancel.")
         return {'RUNNING_MODAL'}
         
     def cancel(self, context):
-        wm = context.window_manager
-        wm.event_timer_remove(self._timer)
-        context.workspace.status_text_set(None)
+        if self._timer:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if hasattr(context.workspace, "status_text_set"):
+            context.workspace.status_text_set(None)
         self.report({'WARNING'}, "Texture Baking Cancelled")
 
     def finish(self, context):
-        wm = context.window_manager
-        wm.event_timer_remove(self._timer)
-        context.workspace.status_text_set(None)
+        if self._timer:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if hasattr(context.workspace, "status_text_set"):
+            context.workspace.status_text_set(None)
         
         if context.scene.adv_baker.auto_pack:
             try:
