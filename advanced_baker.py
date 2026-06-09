@@ -525,12 +525,13 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         settings = scene.adv_baker
         
         # --- Hardware Info ---
+        iface_ = getattr(bpy.app.translations, "pgettext_iface", lambda x: x)
         cpu, gpu = get_hardware_info()
         sys_box = layout.box()
         sys_box.label(text="System Hardware", icon='DESKTOP')
         col = sys_box.column(align=True)
-        col.row().label(text=f"CPU: {cpu}")
-        col.row().label(text=f"GPU: {gpu}")
+        col.row().label(text=f"{iface_('CPU:')} {cpu}")
+        col.row().label(text=f"{iface_('GPU:')} {gpu}")
         
         layout.separator()
         layout.prop(settings, "bake_mode", expand=True)
@@ -558,7 +559,7 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         
         obj = context.active_object
         if obj:
-            layout.label(text=f"Active: {obj.name}", icon='OBJECT_DATA')
+            layout.label(text=f"{iface_('Active:')} {obj.name}", icon='OBJECT_DATA')
             obj_settings = obj.adv_baker
             col = layout.column(align=True)
             col.enabled = not is_locked
@@ -590,6 +591,53 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         layout.separator()
         layout.operator("advbaker.open_donation", icon='FUND')
 
+translations = {
+    "ar_SA": {
+        ("*", "Advanced Baker"): "الخابز المتقدم",
+        ("*", "System Hardware"): "مواصفات النظام",
+        ("*", "Particle Physics"): "فيزياء الجزيئات",
+        ("*", "Texture / Render"): "الخامات / الرندر",
+        ("*", "Global Queue & Safety"): "القائمة العامة والأمان",
+        ("*", "Pre-Bake Auto-Save"): "حفظ تلقائي قبل الخبز",
+        ("*", "Post-Bake Auto-Pack"): "حزم ملفات العمل بعد الخبز",
+        ("*", "Bake All Queued (Particles)"): "خبز كامل القائمة (جزيئات)",
+        ("*", "Bake All Queued (Textures)"): "خبز كامل القائمة (خامات)",
+        ("*", "Per-Object Overrides:"): "إعدادات العناصر المستقلة:",
+        ("*", "Active:"): "النشط:",
+        ("*", "Start Frame"): "إطار البداية",
+        ("*", "End Frame"): "إطار النهاية",
+        ("*", "Quality"): "الجودة",
+        ("*", "Light"): "منخفضة",
+        ("*", "Medium"): "متوسطة",
+        ("*", "High"): "عالية",
+        ("*", "Bake Active Object Only"): "خبز العنصر المحدد فقط",
+        ("*", "Select an object to see settings."): "الرجاء تحديد عنصر لرؤية الإعدادات.",
+        ("*", "Live Bake Queue"): "قائمة الخبز المباشرة",
+        ("*", "Support Us"): "ادعمنا",
+        ("*", "Queued"): "في الانتظار",
+        ("*", "Baking..."): "جاري الخبز...",
+        ("*", "Done"): "اكتمل",
+        ("*", "Error"): "خطأ",
+        ("*", "Canceled"): "أُلغي",
+        ("*", "Add Selected"): "إضافة المحدد",
+        ("*", "Remove"): "إزالة",
+        ("*", "Clear Completed"): "مسح المكتمل",
+        ("*", "Bake Queue (Particles)"): "خبز القائمة (جزيئات)",
+        ("*", "Bake Queue (Textures)"): "خبز القائمة (خامات)",
+        ("*", "Queue Index"): "مؤشر القائمة",
+        ("*", "Status"): "الحالة",
+        ("*", "Progress"): "التقدم",
+        ("*", "System Name"): "اسم النظام",
+        ("*", "Bake Mode"): "وضع الخبز",
+        ("*", "Is Baking"): "جاري الخبز",
+        ("*", "<Deleted>"): "<محذوف>",
+        ("*", "CPU:"): "المعالج:",
+        ("*", "GPU:"): "كرت الشاشة:",
+    }
+}
+translations["ar_EG"] = translations["ar_SA"]
+translations["ar"] = translations["ar_SA"]
+
 # --- Registration ---
 
 classes = (
@@ -609,6 +657,9 @@ classes = (
 )
 
 def register():
+    try:
+        bpy.app.translations.register(__name__, translations)
+    except: pass
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Object.adv_baker = bpy.props.PointerProperty(type=AdvBakerObjectSettings)
@@ -617,6 +668,9 @@ def register():
     bpy.types.Scene.adv_baker_active_index = bpy.props.IntProperty(name="Active Queue Index", default=0)
 
 def unregister():
+    try:
+        bpy.app.translations.unregister(__name__)
+    except: pass
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     del bpy.types.Object.adv_baker
