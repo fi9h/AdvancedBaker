@@ -347,7 +347,7 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
         layout.prop(settings, "bake_mode", expand=True)
         
         box = layout.box()
-        box.label(text="Global Queue & Safety", icon='SHIELD')
+        box.label(text="Global Queue & Safety", icon='LOCKED')
         box.prop(settings, "auto_save")
         box.prop(settings, "auto_pack")
         
