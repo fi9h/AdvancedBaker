@@ -425,6 +425,63 @@ class ADVBAKER_OT_open_donation(bpy.types.Operator):
         webbrowser.open("https://ko-fi.com/faisalabusadahakafi9h")
         return {'FINISHED'}
 
+class ADVBAKER_OT_bake_active(bpy.types.Operator):
+    bl_idname = "advbaker.bake_active"
+    bl_label = "Bake Active Object Only"
+    
+    def execute(self, context):
+        if context.scene.adv_baker.is_baking:
+            return {'CANCELLED'}
+        obj = context.active_object
+        if not obj:
+            self.report({'WARNING'}, "No active object selected!")
+            return {'CANCELLED'}
+        queue = context.scene.adv_baker_queue
+        mode = context.scene.adv_baker.bake_mode
+        idx = -1
+        
+        if mode == 'PARTICLES':
+            for i, item in enumerate(queue):
+                if item.obj_ptr == obj and item.system_name != "Texture":
+                    idx = i
+                    break
+            if idx == -1:
+                has_particles = False
+                for mod in obj.modifiers:
+                    if mod.type == 'PARTICLE_SYSTEM':
+                        item = queue.add()
+                        item.name = f"{obj.name} [{mod.name}]"
+                        item.obj_ptr = obj
+                        item.system_name = mod.name
+                        item.status = 'QUEUED'
+                        item.progress = 0.0
+                        idx = len(queue) - 1
+                        has_particles = True
+                        break
+                if not has_particles:
+                    self.report({'WARNING'}, "Active object has no particle systems!")
+                    return {'CANCELLED'}
+            bpy.ops.advbaker.bake_particles_modal(queue_index=idx)
+        else:
+            for i, item in enumerate(queue):
+                if item.obj_ptr == obj and item.system_name == "Texture":
+                    idx = i
+                    break
+            if idx == -1:
+                if obj.type != 'MESH':
+                    self.report({'WARNING'}, "Active object must be a MESH!")
+                    return {'CANCELLED'}
+                item = queue.add()
+                item.name = f"{obj.name} [Texture]"
+                item.obj_ptr = obj
+                item.system_name = "Texture"
+                item.status = 'QUEUED'
+                item.progress = 0.0
+                idx = len(queue) - 1
+            bpy.ops.advbaker.bake_textures_modal(queue_index=idx)
+            
+        return {'FINISHED'}
+
 # --- UI Lists and Panels ---
 
 class ADVBAKER_UL_queue_list(bpy.types.UIList):
@@ -504,11 +561,15 @@ class ADVBAKER_PT_main_panel(bpy.types.Panel):
             layout.label(text=f"Active: {obj.name}", icon='OBJECT_DATA')
             obj_settings = obj.adv_baker
             col = layout.column(align=True)
+            col.enabled = not is_locked
             if settings.bake_mode == 'PARTICLES':
                 col.prop(obj_settings, "start_frame")
                 col.prop(obj_settings, "end_frame")
             else:
                 col.prop(obj_settings, "quality")
+                
+            col.separator()
+            col.operator("advbaker.bake_active", icon='PLAY', text="Bake Active Object Only")
         else:
             layout.label(text="Select an object to see settings.", icon='ERROR')
             
@@ -542,6 +603,7 @@ classes = (
     ADVBAKER_OT_bake_particles_modal,
     ADVBAKER_OT_bake_textures_modal,
     ADVBAKER_OT_open_donation,
+    ADVBAKER_OT_bake_active,
     ADVBAKER_UL_queue_list,
     ADVBAKER_PT_main_panel,
 )
