@@ -171,6 +171,8 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
     bl_idname = "advbaker.bake_particles_modal"
     bl_label = "Bake Queue (Particles)"
     
+    queue_index: bpy.props.IntProperty(name="Queue Index", default=-1, options={'HIDDEN'})
+    
     _timer = None
     _queue_items = []
     _current_item_index = 0
@@ -250,7 +252,12 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
             bpy.ops.wm.save_mainfile()
             
         queue = context.scene.adv_baker_queue
-        self._queue_items = [item for item in queue if item.status in {'QUEUED', 'ERROR', 'CANCELED'}]
+        if self.queue_index != -1 and 0 <= self.queue_index < len(queue):
+            item = queue[self.queue_index]
+            item.status = 'QUEUED'
+            self._queue_items = [item]
+        else:
+            self._queue_items = [item for item in queue if item.status in {'QUEUED', 'ERROR', 'CANCELED'}]
         
         if not self._queue_items:
             self.report({'WARNING'}, "No valid queued items to bake.")
@@ -294,6 +301,8 @@ class ADVBAKER_OT_bake_particles_modal(bpy.types.Operator):
 class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
     bl_idname = "advbaker.bake_textures_modal"
     bl_label = "Bake Queue (Textures)"
+    
+    queue_index: bpy.props.IntProperty(name="Queue Index", default=-1, options={'HIDDEN'})
     
     _timer = None
     _queue_items = []
@@ -367,7 +376,12 @@ class ADVBAKER_OT_bake_textures_modal(bpy.types.Operator):
             bpy.ops.wm.save_mainfile()
             
         queue = context.scene.adv_baker_queue
-        self._queue_items = [item for item in queue if item.status in {'QUEUED', 'ERROR', 'CANCELED'} and item.system_name == "Texture"]
+        if self.queue_index != -1 and 0 <= self.queue_index < len(queue):
+            item = queue[self.queue_index]
+            item.status = 'QUEUED'
+            self._queue_items = [item]
+        else:
+            self._queue_items = [item for item in queue if item.status in {'QUEUED', 'ERROR', 'CANCELED'} and item.system_name == "Texture"]
         
         if not self._queue_items:
             self.report({'WARNING'}, "No valid queued items for textures.")
@@ -422,17 +436,24 @@ class ADVBAKER_UL_queue_list(bpy.types.UIList):
         else:
             row.label(text=item.name, icon='OBJECT_DATA')
             
-        if item.status == 'QUEUED':
-            row.label(text="Queued", icon='TIME')
-        elif item.status == 'BAKING':
+        if item.status == 'BAKING':
             row.prop(item, "progress", text="", slider=True)
-            row.label(text="", icon='PLAY')
-        elif item.status == 'DONE':
-            row.label(text="Done", icon='CHECKMARK')
-        elif item.status == 'ERROR':
-            row.label(text="Error", icon='CANCEL')
-        elif item.status == 'CANCELED':
-            row.label(text="Canceled", icon='PAUSE')
+            row.label(text="", icon='TIME')
+        else:
+            if item.status == 'QUEUED':
+                row.label(text="Queued", icon='TIME')
+            elif item.status == 'DONE':
+                row.label(text="Done", icon='CHECKMARK')
+            elif item.status == 'ERROR':
+                row.label(text="Error", icon='CANCEL')
+            elif item.status == 'CANCELED':
+                row.label(text="Canceled", icon='PAUSE')
+                
+            if not context.scene.adv_baker.is_baking:
+                mode = context.scene.adv_baker.bake_mode
+                op_idname = "advbaker.bake_particles_modal" if mode == 'PARTICLES' else "advbaker.bake_textures_modal"
+                op = row.operator(op_idname, icon='PLAY', text="")
+                op.queue_index = index
 
 class ADVBAKER_PT_main_panel(bpy.types.Panel):
     bl_label = "Advanced Baker"
